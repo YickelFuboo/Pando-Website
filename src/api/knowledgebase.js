@@ -67,6 +67,11 @@ export async function getParserConfigTemplate() {
   return res
 }
 
+export async function getKbParserConfig(kbId) {
+  const res = await requestKnowledge(`${PREFIX}/${kbId}/parser-config`, { method: 'GET' }, query())
+  return res
+}
+
 export async function updateKbParserConfig(kbId, body) {
   const res = await requestKnowledge(`${PREFIX}/${kbId}/parser-config`, {
     method: 'PUT',
@@ -87,5 +92,18 @@ export async function getRerankModels() {
 
 export async function getChatModels() {
   const res = await requestKnowledge('/api/v1/models/available/chat', { method: 'GET' }, query())
+  return res
+}
+
+export async function listConcepts(kbId, params = {}) {
+  const q = query({
+    kb_ids: kbId,
+    page: params.page ?? 1,
+    page_size: Math.min(Math.max(params.page_size ?? 20, 1), 100),
+  })
+  if (params.keyword != null && String(params.keyword).trim() !== '') {
+    q.keyword = String(params.keyword).trim()
+  }
+  const res = await requestKnowledge('/api/v1', { method: 'GET' }, q)
   return res
 }

@@ -167,6 +167,14 @@
                   <span class="field-hint">范围 0-32，0 表示不生成关键词</span>
                 </div>
                 <div class="field">
+                  <label>是否自动提取概念 (auto_concepts)</label>
+                  <select v-model="configForm.parser_config.auto_concepts" class="field-select">
+                    <option :value="false">否</option>
+                    <option :value="true">是</option>
+                  </select>
+                  <span class="field-hint">启用后将自动从文档内容中提取概念信息</span>
+                </div>
+                <div class="field">
                   <label>自动生成问题数量 (auto_questions)</label>
                   <input v-model.number="configForm.parser_config.auto_questions" type="number" min="0" max="10" placeholder="0" />
                   <span class="field-hint">范围 0-10，0 表示不生成问题</span>
@@ -275,6 +283,51 @@
           </div>
         </div>
       </div>
+      <div v-if="showConceptDialog" class="dialog-mask">
+        <div class="dialog dialog-concept-list">
+          <div class="dialog-head">
+            <span class="dialog-title">知识库概念</span>
+            <button type="button" class="dialog-close" aria-label="关闭" @click="showConceptDialog = false">×</button>
+          </div>
+          <div class="dialog-body">
+            <div v-if="conceptKbItem" class="concept-dialog-meta">
+              <span class="concept-kb-name">{{ kbInfoMap[conceptKbItem.kb_id]?.name ?? conceptKbItem.kb_id }}</span>
+            </div>
+            <div v-if="conceptsLoading" class="edit-loading">加载概念中…</div>
+            <template v-else>
+              <div v-if="!conceptsList.length" class="placeholder">暂无概念</div>
+              <div v-else class="concept-table-wrap">
+                <table class="doc-table concept-table">
+                  <thead>
+                    <tr>
+                      <th class="col-name">概念名称</th>
+                      <th class="col-desc">描述</th>
+                      <th class="col-docs">来源文档</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="c in conceptsList" :key="c.id">
+                      <td class="col-name" :title="c.concept_name">{{ c.concept_name }}</td>
+                      <td class="col-desc" :title="c.description || ''">{{ c.description || '—' }}</td>
+                      <td class="col-docs">{{ (c.document_names && c.document_names.length) ? c.document_names.join('、') : '—' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-if="conceptTotal > conceptPageSize" class="concept-pagination">
+                <span class="concept-pagination-info">共 {{ conceptTotal }} 条，第 {{ conceptPage }} / {{ conceptTotalPages }} 页</span>
+                <div class="concept-pagination-btns">
+                  <button type="button" class="btn-sm" :disabled="conceptPage <= 1" @click="loadConcepts(conceptPage - 1)">上一页</button>
+                  <button type="button" class="btn-sm" :disabled="conceptPage >= conceptTotalPages" @click="loadConcepts(conceptPage + 1)">下一页</button>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div class="dialog-actions">
+            <button type="button" class="btn" @click="showConceptDialog = false">关闭</button>
+          </div>
+        </div>
+      </div>
     </Teleport>
     <div v-if="!hasVersion" class="empty-state">请先在顶部选择产品版本</div>
     <div v-else class="panels">
@@ -308,6 +361,7 @@
                     <button type="button" class="btn-icon" title="知识库配置" @click="openConfig(item)" aria-label="配置">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                     </button>
+                    <button type="button" class="btn-sm" title="查看知识库中的全部概念" @click="openConcepts(item)">概念</button>
                     <button type="button" class="btn-sm" @click="openEdit(item)">编辑</button>
                     <button type="button" class="btn-sm danger" @click="handleDelete(item)">删除</button>
                   </div>
@@ -389,7 +443,7 @@
 import { ref, computed, watch } from 'vue'
 import { useProductSelection } from '../../composables/useProductSelection.js'
 import { getCategories, listVersionKbs, addKbToVersion, updateVersionKb, removeKbFromVersion } from '../../api/kbMgmt.js'
-import { createKb, listKbsByTenant, updateKb, deleteKb, getKbDetail, getParserConfigTemplate, updateKbParserConfig, getEmbeddingModels, getRerankModels } from '../../api/knowledgebase.js'
+import { createKb, listKbsByTenant, updateKb, deleteKb, getKbDetail, getKbParserConfig, getParserConfigTemplate, updateKbParserConfig, getEmbeddingModels, getRerankModels, listConcepts } from '../../api/knowledgebase.js'
 import { listDocumentsByKb, uploadDocuments, updateDocument, parseDocument, deleteDocument, getDocumentChunksBatch, downloadDocument } from '../../api/document.js'
 
 const { selectedVersionId } = useProductSelection()
@@ -402,6 +456,7 @@ const DEFAULT_PARSER_CONFIG = {
   task_page_size: 12,
   layout_recognize: 'DeepDOC',
   auto_keywords: 0,
+  auto_concepts: false,
   auto_questions: 0,
   html4excel: false,
   topn_tags: 3,
@@ -475,6 +530,18 @@ const docEditForm = ref({ doc: null, description: '' })
 const showConfigDialog = ref(false)
 const configKbItem = ref(null)
 const configDetailLoading = ref(false)
+const showConceptDialog = ref(false)
+const conceptKbItem = ref(null)
+const conceptsList = ref([])
+const conceptsLoading = ref(false)
+const conceptPage = ref(1)
+const conceptTotal = ref(0)
+const conceptPageSize = ref(20)
+const conceptTotalPages = computed(() => {
+  const total = conceptTotal.value
+  const size = conceptPageSize.value
+  return size > 0 ? Math.ceil(total / size) || 1 : 1
+})
 const configSaving = ref(false)
 const configTab = ref('model')
 const embeddingModelsList = ref([])
@@ -981,8 +1048,9 @@ async function openConfig(item) {
   configDetailLoading.value = true
   modelsLoading.value = true
   try {
-    const [detail, templateRes, embdModelsRes, rerankModelsRes] = await Promise.all([
+    const [detail, parserConfigRes, templateRes, embdModelsRes, rerankModelsRes] = await Promise.all([
       getKbDetail(item.kb_id),
+      getKbParserConfig(item.kb_id).catch(() => null),
       getParserConfigTemplate().catch(() => null),
       getEmbeddingModels().catch((e) => {
         console.error('Failed to load embedding models:', e)
@@ -1037,13 +1105,16 @@ async function openConfig(item) {
     console.log('Final embeddingModelsList:', embeddingModelsList.value)
     console.log('Final rerankModelsList:', rerankModelsList.value)
     const template = templateRes?.template ?? DEFAULT_PARSER_CONFIG
+    const parserFromDetail = detail?.parser_config
+    const parserFromApi = parserConfigRes?.parser_config ?? parserConfigRes
+    const parserConfig = deepMergeParserConfig(template, parserFromApi ?? parserFromDetail)
     configForm.value = {
       embd_provider_name: detail?.embd_provider_name ?? '',
       embd_model_name: detail?.embd_model_name ?? '',
       rerank_provider_name: detail?.rerank_provider_name ?? '',
       rerank_model_name: detail?.rerank_model_name ?? '',
-      parser_id: detail?.parser_id ?? '',
-      parser_config: deepMergeParserConfig(template, detail?.parser_config),
+      parser_id: parserConfigRes?.parser_id ?? detail?.parser_id ?? '',
+      parser_config: parserConfig,
     }
   } catch {
     // 忽略错误，使用默认值
@@ -1071,12 +1142,44 @@ async function submitConfig() {
       parser_config: form.parser_config || undefined,
     }
     await updateKbParserConfig(item.kb_id, parserPayload)
+    await loadVersionKbs()
     showConfigDialog.value = false
   } catch (e) {
     const d = e?.data?.detail
     alert((typeof d === 'object' && d?.message) ? d.message : (d || e?.message || '保存失败'))
   } finally {
     configSaving.value = false
+  }
+}
+
+function openConcepts(item) {
+  conceptKbItem.value = item
+  conceptPage.value = 1
+  conceptTotal.value = 0
+  conceptsList.value = []
+  showConceptDialog.value = true
+  loadConcepts(1)
+}
+
+async function loadConcepts(page) {
+  const item = conceptKbItem.value
+  if (!item?.kb_id) return
+  conceptPage.value = page
+  conceptsLoading.value = true
+  try {
+    const res = await listConcepts(item.kb_id, {
+      page,
+      page_size: conceptPageSize.value,
+    })
+    conceptsList.value = res?.items ?? []
+    conceptTotal.value = res?.total ?? 0
+  } catch (e) {
+    conceptsList.value = []
+    conceptTotal.value = 0
+    const d = e?.data?.detail
+    alert((typeof d === 'object' && d?.message) ? d.message : (d || e?.message || '加载概念失败'))
+  } finally {
+    conceptsLoading.value = false
   }
 }
 
@@ -1464,6 +1567,30 @@ async function handleDelete(item) {
 }
 .config-section-group:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
 .field-monospace { font-family: ui-monospace, monospace; font-size: 13px; }
+.dialog-concept-list { min-width: 560px; max-width: 720px; }
+.dialog-concept-list .dialog-body { max-height: 70vh; overflow-y: auto; }
+.concept-dialog-meta { margin-bottom: 12px; }
+.concept-kb-name { font-size: 14px; font-weight: 500; color: #202124; }
+.concept-table-wrap { overflow-x: auto; margin-top: 12px; }
+.concept-table { width: 100%; border-collapse: collapse; }
+.concept-table th,
+.concept-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e8eaed; font-size: 14px; }
+.concept-table th { background: #f8fafc; color: #5f6368; font-weight: 500; }
+.concept-table .col-name { max-width: 180px; }
+.concept-table .col-desc { max-width: 240px; }
+.concept-table .col-docs { max-width: 200px; }
+.concept-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #e8eaed;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.concept-pagination-info { font-size: 13px; color: #5f6368; }
+.concept-pagination-btns { display: flex; gap: 8px; }
 .kb-item-main .kb-item-name { min-width: 0; }
 .kb-item-doc {
   flex-shrink: 0;
