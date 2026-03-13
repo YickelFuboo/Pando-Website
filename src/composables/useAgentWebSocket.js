@@ -2,7 +2,6 @@ import { ref, shallowRef, onUnmounted } from 'vue'
 import { getAgentWorkerWsBase } from '../api/requestAgentWorker.js'
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000
-const IDLE_STOP_PING_MS = 1800 * 1000
 
 function buildWsUrl(sessionId, wsBase) {
   const base = wsBase || getAgentWorkerWsBase()
@@ -17,7 +16,6 @@ export function useAgentWebSocket() {
   const connected = ref(false)
   const lastActivityAt = ref(0)
   let pingTimer = null
-  let idleCheckTimer = null
   let messageHandler = null
 
   function markActivity() {
@@ -28,10 +26,6 @@ export function useAgentWebSocket() {
     if (pingTimer) {
       clearInterval(pingTimer)
       pingTimer = null
-    }
-    if (idleCheckTimer) {
-      clearInterval(idleCheckTimer)
-      idleCheckTimer = null
     }
   }
 
@@ -63,7 +57,6 @@ export function useAgentWebSocket() {
       connected.value = true
       markActivity()
       startPing()
-      startIdleCheck()
     }
 
     socket.onmessage = (event) => {
@@ -90,36 +83,17 @@ export function useAgentWebSocket() {
     }
   }
 
+  /** 选中会话持续保活：后台任务可能很久才完成，会无规律间隔返回响应，故只要当前会话处于选中状态就持续 ping；切会话时 disconnect 会清掉定时器 */
   function startPing() {
     clearTimers()
     pingTimer = setInterval(() => {
       const s = ws.value
       if (!s || s.readyState !== WebSocket.OPEN) return
-      const idle = Date.now() - lastActivityAt.value
-      if (idle >= IDLE_STOP_PING_MS) {
-        clearTimers()
-        return
-      }
       try {
         s.send(JSON.stringify({ type: 'ping' }))
       } catch (_) {}
     }, HEARTBEAT_INTERVAL_MS)
-
-    idleCheckTimer = setInterval(() => {
-      const idle = Date.now() - lastActivityAt.value
-      if (idle >= IDLE_STOP_PING_MS) {
-        clearTimers()
-        const s = ws.value
-        if (s && s.readyState === WebSocket.OPEN) {
-          try {
-            s.close()
-          } catch (_) {}
-        }
-      }
-    }, 10000)
   }
-
-  function startIdleCheck() {}
 
   /** payload: content (必填), user_id?, agent_type?, llm_provider?, llm_model?，可选不传则用会话已有值 */
   function send(payload) {

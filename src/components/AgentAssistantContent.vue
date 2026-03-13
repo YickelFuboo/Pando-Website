@@ -474,6 +474,7 @@ async function loadHistory(item) {
   } finally {
     await nextTick()
     scrollToBottom()
+    connectWs()
   }
 }
 
