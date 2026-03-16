@@ -102,6 +102,29 @@
             </button>
           </div>
         </div>
+        <div v-if="needGitRepoPath" class="qa-model-select-wrap qa-git-path-wrap">
+          <label class="qa-label">Git 仓本地目录</label>
+          <div class="qa-git-path-row">
+            <input
+              v-model="gitRepoPath"
+              type="text"
+              class="qa-git-path-input"
+              placeholder="选择或输入 Git 本地路径"
+              @input="scheduleUpdateSession"
+            />
+            <input
+              ref="gitDirInputRef"
+              type="file"
+              webkitdirectory
+              directory
+              class="qa-git-path-hidden-input"
+              @change="onGitDirSelected"
+            />
+            <button type="button" class="qa-git-path-btn" @click="openGitDirPicker">
+              选择目录
+            </button>
+          </div>
+        </div>
       </div>
       <div class="qa-chat-body">
         <div class="qa-chat-messages" ref="messagesRef" @scroll="onMessagesScroll" @mousedown="markActivity">
@@ -133,8 +156,20 @@
             </div>
           </div>
         </div>
-        <div class="qa-chat-input-wrap">
-          <div class="qa-input-box" :class="{ disabled: !inputAllowed }">
+        <div class="qa-chat-input-wrap" ref="inputWrapRef">
+          <div
+            class="qa-input-resize-handle"
+            title="拖动拉高输入框"
+            @mousedown.prevent="startResizeInput"
+          >
+            <span class="qa-input-resize-handle-bar" />
+          </div>
+          <div
+            class="qa-input-box"
+            :class="{ disabled: !inputAllowed, 'qa-input-box-resized': inputAreaHeight != null }"
+            :style="inputAreaHeight != null ? { height: inputAreaHeight + 'px' } : {}"
+            ref="inputBoxRef"
+          >
             <textarea
               v-model="inputText"
               class="qa-input"
@@ -145,7 +180,6 @@
               @keydown.enter.exact.prevent="inputAllowed && send()"
             />
             <div class="qa-input-footer">
-              <div class="qa-input-footer-left"></div>
               <button
                 type="button"
                 class="qa-send-btn"
@@ -166,7 +200,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { marked } from 'marked'
 import { useAuth } from '../composables/useAuth.js'
-import { listSessions, getSessionInfo, getSessionMessages, createSession, deleteSession, getChatModels, getAgentTypes, getUserId } from '../api/agentWorker.js'
+import { listSessions, getSessionInfo, getSessionMessages, createSession, deleteSession, updateSession, getChatModels, getAgentTypes, getUserId } from '../api/agentWorker.js'
 import { useAgentWebSocket } from '../composables/useAgentWebSocket.js'
 
 const { user, userDisplayName, avatarUrl, loadAvatar, avatarObjectUrls } = useAuth()
@@ -204,6 +238,8 @@ const modelsLoading = ref(false)
 const selectedModelValue = ref('')
 const defaultModelValue = ref(null)
 const selectedAgentType = ref('')
+const gitRepoPath = ref('')
+const gitDirInputRef = ref(null)
 const showModelDropdown = ref(false)
 const showAgentDropdown = ref(false)
 const modelSelectWrapRef = ref(null)
@@ -211,6 +247,11 @@ const agentSelectWrapRef = ref(null)
 const creatingSession = ref(false)
 const createSessionError = ref('')
 const deletingSessionId = ref(null)
+const inputWrapRef = ref(null)
+const inputBoxRef = ref(null)
+const inputAreaHeight = ref(null)
+const INPUT_AREA_MIN_H = 120
+const INPUT_AREA_MAX_H = 480
 let streamDoneTimer = null
 
 const chatModelGroups = computed(() => {
@@ -268,14 +309,92 @@ const selectedModel = computed(() => {
 
 const inputAllowed = computed(() => true)
 
+const needGitRepoPath = computed(() => {
+  const t = selectedAgentType.value
+  return t === 'CodeAnalysis' || t === 'CodingAgent'
+})
+
+const sessionMetadata = computed(() => {
+  if (!needGitRepoPath.value || !gitRepoPath.value) return {}
+  return { git_repo_path: gitRepoPath.value }
+})
+
 function selectModel(opt) {
   selectedModelValue.value = opt.value
   showModelDropdown.value = false
+  scheduleUpdateSession()
 }
 
 function selectAgentType(opt) {
   selectedAgentType.value = opt.value
   showAgentDropdown.value = false
+  scheduleUpdateSession()
+}
+
+let updateSessionTimer = null
+async function updateCurrentSession() {
+  const sid = currentSessionId.value
+  if (!sid) return
+  try {
+    await updateSession(sid, {
+      agent_type: selectedAgentType.value || null,
+      llm_provider: selectedModel.value?.provider ?? null,
+      llm_model: selectedModel.value?.model ?? null,
+      metadata: Object.keys(sessionMetadata.value).length ? sessionMetadata.value : null,
+    })
+  } catch (_) {}
+}
+
+function scheduleUpdateSession() {
+  if (updateSessionTimer) clearTimeout(updateSessionTimer)
+  updateSessionTimer = setTimeout(() => {
+    updateSessionTimer = null
+    updateCurrentSession()
+  }, 400)
+}
+
+function openGitDirPicker() {
+  const el = gitDirInputRef.value
+  if (el) {
+    el.value = ''
+    el.click()
+  }
+}
+
+function onGitDirSelected(e) {
+  const input = e.target
+  const files = input?.files
+  if (!files?.length) return
+  const first = files[0]
+  const relativePath = first.webkitRelativePath || first.name || ''
+  const dirPath = relativePath ? relativePath.split('/')[0] : ''
+  const rawPath = typeof input.value === 'string' ? input.value.trim() : ''
+  gitRepoPath.value = rawPath || dirPath || ''
+  if (gitRepoPath.value) scheduleUpdateSession()
+  input.value = ''
+}
+
+function startResizeInput(e) {
+  const box = inputBoxRef.value
+  if (!box) return
+  const startY = e.clientY
+  const rect = box.getBoundingClientRect()
+  const startH = inputAreaHeight.value != null ? inputAreaHeight.value : rect.height
+  function onMove(moveE) {
+    const delta = startY - moveE.clientY
+    const newH = Math.round(Math.min(INPUT_AREA_MAX_H, Math.max(INPUT_AREA_MIN_H, startH + delta)))
+    inputAreaHeight.value = newH
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+    document.body.style.userSelect = ''
+    document.body.style.cursor = ''
+  }
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'ns-resize'
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
 }
 
 function flattenChatModelsFromBackend(res) {
@@ -455,6 +574,7 @@ async function startNewChat() {
       agent_type: agentType || null,
       llm_provider: provider || null,
       llm_model: model,
+      metadata: Object.keys(sessionMetadata.value).length ? sessionMetadata.value : null,
     })
     const sid = res?.session_id
     if (sid) {
@@ -501,6 +621,11 @@ async function loadHistory(item) {
       const val = p && m ? `${p}|${m}` : p || m || ''
       const opt = chatModelOptions.value.find((o) => o.provider === p && o.model === m)
       selectedModelValue.value = opt ? opt.value : val
+    }
+    if (info?.metadata && typeof info.metadata === 'object' && info.metadata.git_repo_path != null) {
+      gitRepoPath.value = String(info.metadata.git_repo_path)
+    } else {
+      gitRepoPath.value = ''
     }
   } catch {
     messages.value = []
@@ -601,6 +726,7 @@ async function send() {
     agent_type: selectedAgentType.value || undefined,
     llm_provider: selectedModel.value?.provider ?? undefined,
     llm_model: selectedModel.value?.model ?? undefined,
+    metadata: Object.keys(sessionMetadata.value).length ? sessionMetadata.value : undefined,
   }
 
   async function waitConnected(ms) {
@@ -865,6 +991,61 @@ onUnmounted(() => {
 }
 .agent-select-wrap {
   min-width: 140px;
+}
+.qa-git-path-wrap {
+  min-width: 200px;
+  flex: 1;
+  max-width: 480px;
+}
+.qa-git-path-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.qa-git-path-input {
+  flex: 1;
+  min-width: 120px;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: #202124;
+  background: #fff;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.qa-git-path-input::placeholder {
+  color: #9aa0a6;
+}
+.qa-git-path-input:hover {
+  border-color: #1a73e8;
+}
+.qa-git-path-input:focus {
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 1px rgba(26, 115, 232, 0.15);
+}
+.qa-git-path-hidden-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.qa-git-path-btn {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: #1a73e8;
+  background: #e8f0fe;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.qa-git-path-btn:hover {
+  background: #d2e3fc;
 }
 .qa-label {
   font-size: 13px;
@@ -1138,17 +1319,46 @@ onUnmounted(() => {
 }
 .qa-chat-input-wrap {
   flex-shrink: 0;
-  padding: 12px 16px;
+  padding: 0 16px 12px;
+  padding-top: 4px;
   border-top: 1px solid #e8eaed;
   background: #fff;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.qa-input-resize-handle {
+  flex-shrink: 0;
+  height: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  margin-bottom: 2px;
+  border-radius: 4px;
+  color: #9aa0a6;
+  transition: color 0.15s, background 0.15s;
+}
+.qa-input-resize-handle:hover {
+  color: #1a73e8;
+  background: rgba(26, 115, 232, 0.06);
+}
+.qa-input-resize-handle-bar {
+  display: block;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: currentColor;
 }
 .qa-input-box {
+  position: relative;
   border: 1px solid #dadce0;
   border-radius: 12px;
   background: #fff;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 120px;
 }
 .qa-input-box:focus-within {
   border-color: #1a73e8;
@@ -1159,31 +1369,33 @@ onUnmounted(() => {
   border-color: #e8eaed;
 }
 .qa-input {
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  padding: 12px 16px 8px;
+  padding: 12px 16px 52px 16px;
+  padding-right: 100px;
   font-size: 14px;
   border: none;
   outline: none;
   resize: none;
-  min-height: 56px;
-  max-height: 120px;
+  overflow-y: auto;
   font-family: inherit;
   background: transparent;
+  box-sizing: border-box;
 }
 .qa-input::placeholder {
   color: #9aa0a6;
 }
 .qa-input-footer {
+  position: absolute;
+  bottom: 10px;
+  right: 16px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px 10px 16px;
-  gap: 12px;
+  pointer-events: none;
 }
-.qa-input-footer-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.qa-input-footer .qa-send-btn {
+  pointer-events: auto;
 }
 .qa-send-btn {
   flex-shrink: 0;

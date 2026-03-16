@@ -95,7 +95,7 @@ export function useAgentWebSocket() {
     }, HEARTBEAT_INTERVAL_MS)
   }
 
-  /** payload: content (必填), user_id?, agent_type?, llm_provider?, llm_model?，可选不传则用会话已有值 */
+  /** payload: content (必填), user_id?, agent_type?, llm_provider?, llm_model?, metadata?（字典），可选不传则用会话已有值 */
   function send(payload) {
     markActivity()
     const s = ws.value
@@ -106,6 +106,7 @@ export function useAgentWebSocket() {
       if (payload.agent_type != null && payload.agent_type !== '') body.agent_type = payload.agent_type
       if (payload.llm_provider != null && payload.llm_provider !== '') body.llm_provider = payload.llm_provider
       if (payload.llm_model != null && payload.llm_model !== '') body.llm_model = payload.llm_model
+      if (payload.metadata != null && typeof payload.metadata === 'object') body.metadata = payload.metadata
       s.send(JSON.stringify(body))
       return true
     } catch {

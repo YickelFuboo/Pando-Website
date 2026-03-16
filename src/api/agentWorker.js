@@ -63,6 +63,20 @@ export async function updateSessionConfig(sessionId, body) {
   return res
 }
 
+/** 更新会话信息。body: agent_type?, llm_provider?, llm_model?, metadata?（字典）。PUT /api/v1/sessions/update/{session_id} */
+export async function updateSession(sessionId, body) {
+  const payload = {}
+  if (body.agent_type != null) payload.agent_type = body.agent_type
+  if (body.llm_provider != null) payload.llm_provider = body.llm_provider
+  if (body.llm_model != null) payload.llm_model = body.llm_model
+  if (body.metadata != null && typeof body.metadata === 'object') payload.metadata = body.metadata
+  const res = await requestAgentWorker(`${PREFIX}/update/${encodeURIComponent(sessionId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }, {})
+  return res
+}
+
 const MODELS_PREFIX = '/api/v1/models'
 const AGENTS_PREFIX = '/api/v1/agents'
 
