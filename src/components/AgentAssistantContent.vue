@@ -109,20 +109,10 @@
               v-model="gitRepoPath"
               type="text"
               class="qa-git-path-input"
-              placeholder="选择或输入 Git 本地路径"
+              placeholder="请输入 Git 本地绝对路径（例如：D:\\repo\\project）"
               @input="scheduleUpdateSession"
             />
-            <input
-              ref="gitDirInputRef"
-              type="file"
-              webkitdirectory
-              directory
-              class="qa-git-path-hidden-input"
-              @change="onGitDirSelected"
-            />
-            <button type="button" class="qa-git-path-btn" @click="openGitDirPicker">
-              选择目录
-            </button>
+            <!-- 临时改动：先改为纯输入路径，目录选择逻辑保留在脚本注释里，后续可恢复 -->
           </div>
         </div>
       </div>
@@ -239,7 +229,6 @@ const selectedModelValue = ref('')
 const defaultModelValue = ref(null)
 const selectedAgentType = ref('')
 const gitRepoPath = ref('')
-const gitDirInputRef = ref(null)
 const showModelDropdown = ref(false)
 const showAgentDropdown = ref(false)
 const modelSelectWrapRef = ref(null)
@@ -316,7 +305,7 @@ const needGitRepoPath = computed(() => {
 
 const sessionMetadata = computed(() => {
   if (!needGitRepoPath.value || !gitRepoPath.value) return {}
-  return { git_repo_path: gitRepoPath.value }
+  return { repo_local_path: gitRepoPath.value }
 })
 
 function selectModel(opt) {
@@ -353,26 +342,39 @@ function scheduleUpdateSession() {
   }, 400)
 }
 
-function openGitDirPicker() {
-  const el = gitDirInputRef.value
-  if (el) {
-    el.value = ''
-    el.click()
-  }
-}
-
-function onGitDirSelected(e) {
-  const input = e.target
-  const files = input?.files
-  if (!files?.length) return
-  const first = files[0]
-  const relativePath = first.webkitRelativePath || first.name || ''
-  const dirPath = relativePath ? relativePath.split('/')[0] : ''
-  const rawPath = typeof input.value === 'string' ? input.value.trim() : ''
-  gitRepoPath.value = rawPath || dirPath || ''
-  if (gitRepoPath.value) scheduleUpdateSession()
-  input.value = ''
-}
+// 临时改动：当前仅支持手动输入 repo 本地路径；以下目录选择逻辑保留备份，后续可恢复
+// const gitDirInputRef = ref(null)
+// function openGitDirPicker() {
+//   const el = gitDirInputRef.value
+//   if (el) {
+//     el.value = ''
+//     el.click()
+//   }
+// }
+// function onGitDirSelected(e) {
+//   const input = e.target
+//   const files = input?.files
+//   if (!files?.length) {
+//     input.value = ''
+//     return
+//   }
+//   const first = files[0]
+//   const relativePath = first.webkitRelativePath || first.name || ''
+//   const relativeParts = relativePath ? relativePath.split(/[\\/]/).filter(Boolean) : []
+//   const dirPath = relativeParts.length > 1 ? relativeParts[0] : ''
+//   const rawPath = typeof input.value === 'string' ? input.value.trim() : ''
+//   const safeRawPath = rawPath && !/fakepath/i.test(rawPath) ? rawPath : ''
+//   const fakePathName = rawPath ? rawPath.split(/[\\/]/).filter(Boolean).pop() || '' : ''
+//   const firstFilePath = typeof first?.path === 'string' ? first.path.trim() : ''
+//   let absoluteDirPath = ''
+//   if (firstFilePath) {
+//     const lastSlash = Math.max(firstFilePath.lastIndexOf('/'), firstFilePath.lastIndexOf('\\'))
+//     absoluteDirPath = lastSlash > 0 ? firstFilePath.slice(0, lastSlash) : firstFilePath
+//   }
+//   gitRepoPath.value = absoluteDirPath || safeRawPath || dirPath || fakePathName || gitRepoPath.value || ''
+//   if (gitRepoPath.value) scheduleUpdateSession()
+//   input.value = ''
+// }
 
 function startResizeInput(e) {
   const box = inputBoxRef.value
@@ -622,8 +624,15 @@ async function loadHistory(item) {
       const opt = chatModelOptions.value.find((o) => o.provider === p && o.model === m)
       selectedModelValue.value = opt ? opt.value : val
     }
-    if (info?.metadata && typeof info.metadata === 'object' && info.metadata.git_repo_path != null) {
-      gitRepoPath.value = String(info.metadata.git_repo_path)
+    if (info?.metadata && typeof info.metadata === 'object') {
+      if (info.metadata.repo_local_path != null) {
+        gitRepoPath.value = String(info.metadata.repo_local_path)
+      } else if (info.metadata.git_repo_path != null) {
+        // 兼容历史字段，便于临时改动期间平滑过渡
+        gitRepoPath.value = String(info.metadata.git_repo_path)
+      } else {
+        gitRepoPath.value = ''
+      }
     } else {
       gitRepoPath.value = ''
     }
